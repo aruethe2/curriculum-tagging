@@ -1,0 +1,212 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+	<script src="//underscorejs.org/underscore-min.js"></script>
+	<script src="./mustache.min.js"></script>
+	<script src="./jqcloud.min.js"></script>
+	<link rel="stylesheet" href="./jqcloud.min.css">
+</head>
+
+<body onload="renderPage()">
+
+<div id="target">Loading...</div>
+
+
+<script id="course_template" type="x-tmpl-mustache">
+	<h1>{{ coursenumber }}: {{ coursetitle }}</h1>
+
+	<h2>Social Justice Tags</h2>
+	{{#social_justice_tags}}<a href="?tag={{.}}">{{.}}</a><BR>{{/social_justice_tags}}
+	{{^social_justice_tags}}No tags({{/social_justice_tags}}
+
+	<BR>
+	<h2>Other Tags</h2>
+	{{#other_tags}}<a href="?tag={{.}}">{{.}}</a><BR>{{/other_tags}}
+	{{^other_tags}}No tags{{/other_tags}}
+</script>
+
+
+<script id="tag_template" type="x-tmpl-mustache">
+	<h1>Tag: {{ tag }}</h1>
+
+	<h2>Courses</h2>
+	{{#courses}}<a href="?coursenumber={{coursenumber}}">{{coursenumber}}: {{coursetitle}}</a><BR>{{/courses}}
+	{{^courses}}No courses{{/courses}}
+</script>
+
+
+
+<script id="home_template" type="x-tmpl-mustache">
+	<h1>Tag: {{ tag }}</h1>
+	<div id='cloud'></div>
+	<h2>Tags</h2>
+	{{#tags}}<a href="?tag={{.}}">{{.}}</a><BR>{{/tags}}
+	{{^tags}}No courses{{/tags}}
+</script>
+
+
+
+</body>
+
+
+<script>
+
+function renderPage() {
+
+	// Get URL parameters
+	params = getURLParams();
+	if ("coursenumber" in params) {
+		renderCourseData(params.coursenumber);
+	} else if ("tag" in params) {
+		renderTagData(params.tag);
+	} else {
+		renderTitleScreen();
+	}
+	
+	
+}
+
+function getURLParams() {	
+
+	// From https://stackoverflow.com/a/2880929
+  var urlParams;
+
+  var match,
+        pl     = /\+/g,  // Regex for replacing addition symbol with a space
+        search = /([^&=]+)=?([^&]*)/g,
+        decode = function (s) { return decodeURIComponent(s.replace(pl, " ")); },
+        query  = window.location.search.substring(1);
+
+    urlParams = {};
+    while (match = search.exec(query))
+       urlParams[decode(match[1])] = decode(match[2]);
+	
+	 return urlParams;
+	
+}
+
+
+
+function renderTitleScreen() {
+
+	var request = new XMLHttpRequest();
+	request.open('GET', './parsed_tag_responses.json', true);
+
+	request.onload = function() {
+		if (this.status >= 200 && this.status < 400) {
+		// Success!
+		var course_json_data = JSON.parse(this.response);
+		var template = document.getElementById('home_template').innerHTML;
+		Mustache.parse(template);   // optional, speeds up future uses
+		
+		// Find all social justice tags
+		var tag_data = _.map(course_json_data, function(course) {if ( course.social_justice_tags.length>1 && course.social_justice_tags[0]!="") {return course.social_justice_tags}});
+		
+		// Add in other terms
+		tag_data = tag_data.concat(_.map(course_json_data, function(course) {return course.other_tags}));
+	
+		tag_data = _.flatten(tag_data);
+		tag_data = _.uniq(tag_data);
+
+		// Sort courses by tag name
+		tag_data.sort();	
+		console.log(tag_data);
+		
+		// Output HTML
+		var rendered = Mustache.render(template, {tags:tag_data});
+		document.getElementById('target').innerHTML = rendered;
+		
+		
+		document.getElementById('#cloud').jQCloud(tag_data);
+		
+	  } else {
+		document.getElementById('target').innerHTML = "Cannot load data";
+	  }
+	};
+
+	request.onerror = function() {
+	  // There was a connection error of some sort
+	  document.getElementById('target').innerHTML = "Cannot load data";
+	};
+
+	request.send();
+
+
+}
+
+
+function renderTagData(tag) {
+
+	var request = new XMLHttpRequest();
+	request.open('GET', './parsed_tag_responses.json', true);
+
+	request.onload = function() {
+		if (this.status >= 200 && this.status < 400) {
+		// Success!
+		var course_json_data = JSON.parse(this.response);
+		var template = document.getElementById('tag_template').innerHTML;
+		Mustache.parse(template);   // optional, speeds up future uses
+		// Find all the course that contain specified tag
+		var course_data = _.filter(course_json_data, function(course) {return _.contains(course.social_justice_tags,tag)});
+		
+		// If can't find social justice terms, look in other terms
+		course_data = course_data.concat(_.filter(course_json_data, function(course) {return _.contains(course.other_tags,tag)}));
+
+		// Sort courses by course numbers
+		course_data = _.sortBy(course_data, function(course) { return course.coursenumber; });		
+		console.log(course_data);
+		
+		// Output HTML
+		var rendered = Mustache.render(template, {tag:tag, courses:course_data});
+		document.getElementById('target').innerHTML = rendered;
+		
+	  } else {
+		document.getElementById('target').innerHTML = "Cannot load data";
+	  }
+	};
+
+	request.onerror = function() {
+	  // There was a connection error of some sort
+	  document.getElementById('target').innerHTML = "Cannot load data";
+	};
+
+	request.send();
+}
+
+
+
+function renderCourseData(coursenumber) {
+
+	var request = new XMLHttpRequest();
+	request.open('GET', './parsed_tag_responses.json', true);
+
+	request.onload = function() {
+		if (this.status >= 200 && this.status < 400) {
+		// Success!
+		var course_json_data = JSON.parse(this.response);
+		var template = document.getElementById('course_template').innerHTML;
+		Mustache.parse(template);   // optional, speeds up future uses
+		var course_data = _.findWhere(course_json_data, {coursenumber:coursenumber});
+		console.log(course_data);
+		var rendered = Mustache.render(template, course_data);
+		document.getElementById('target').innerHTML = rendered;
+		
+	  } else {
+		document.getElementById('target').innerHTML = "Cannot load data";
+	  }
+	};
+
+	request.onerror = function() {
+	  // There was a connection error of some sort
+	  document.getElementById('target').innerHTML = "Cannot load data";
+	};
+
+	request.send();
+}
+
+</script>
+
+
+</html>
+
