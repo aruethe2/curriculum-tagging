@@ -1,16 +1,17 @@
-<!DOCTYPE HTML>
-<html>
-
-<head>
+<!DOCTYPE html>
+<html lang="en">
+  	<title>Swarthmore College Curriculum Tags</title>
+  	<meta name="viewport" content="width=device-width, initial-scale=1">
+  	<link rel="stylesheet" href="https://unpkg.com/tachyons@4.7.0/css/tachyons.min.css"/>
 	<script src="//underscorejs.org/underscore-min.js"></script>
 	<script src="./mustache.min.js"></script>
-	<script src="./jqcloud.min.js"></script>
-	<link rel="stylesheet" href="./jqcloud.min.css">
+	<script src="http://d3js.org/d3.v3.min.js"></script>
+	<script src="./d3.layout.cloud.js"></script>
 </head>
 
-<body onload="renderPage()">
+<body class="pa3" onload="renderPage()">
 
-<div id="target">Loading...</div>
+<div id="target"></div>
 
 
 <script id="course_template" type="x-tmpl-mustache">
@@ -38,11 +39,18 @@
 
 
 <script id="home_template" type="x-tmpl-mustache">
-	<h1>Tag: {{ tag }}</h1>
-	<div id='cloud'></div>
-	<h2>Tags</h2>
-	{{#tags}}<a href="?tag={{.}}">{{.}}</a><BR>{{/tags}}
-	{{^tags}}No courses{{/tags}}
+	<header class="tc ph4">
+		<h1 class="f3 f2-m f1-l fw2 black-90 mv3">Swarthmore College Curriculum Tag Explorer</h1>
+	</header>
+	<div class="taglist fl w-30">
+		<h2>Tags</h2>
+		{{#tags}}<a class='f6 link dim br-pill ph3 pv2 mb2 dib white bg-black' href="?tag={{.}}">{{.}}</a><BR>{{/tags}}
+		{{^tags}}<p>No courses</p>{{/tags}}
+	</div>
+	<div class='wordcloud fl w-70'>
+		<h2>Word Cloud</h2>
+	</div>
+
 </script>
 
 
@@ -52,19 +60,42 @@
 
 <script>
 
+
 function renderPage() {
 
-	// Get URL parameters
-	params = getURLParams();
-	if ("coursenumber" in params) {
-		renderCourseData(params.coursenumber);
-	} else if ("tag" in params) {
-		renderTagData(params.tag);
-	} else {
-		renderTitleScreen();
-	}
+	// First load in JSON file.  Then render the correct page per query params
 	
-	
+	var request = new XMLHttpRequest();
+	request.open('GET', './parsed_tag_responses.json', true);
+
+	request.onload = function() {
+		if (this.status >= 200 && this.status < 400) {
+		// Success!
+		json_data = JSON.parse(this.response);
+		
+		// Get URL parameters and render page
+		params = getURLParams();
+		if ("coursenumber" in params) {
+			renderCourseData(json_data, params.coursenumber);
+		} else if ("tag" in params) {
+			renderTagData(json_data, params.tag);
+		} else {
+			renderTitleScreen(json_data);
+		}
+		
+		
+	  } else {
+		document.getElementById('target').innerHTML = "Cannot load data";
+	  }
+	};
+
+	request.onerror = function() {
+	  // There was a connection error of some sort
+	  document.getElementById('target').innerHTML = "Cannot load data";
+	};
+
+	request.send();
+
 }
 
 function getURLParams() {	
@@ -88,15 +119,8 @@ function getURLParams() {
 
 
 
-function renderTitleScreen() {
+function renderTitleScreen(course_json_data) {
 
-	var request = new XMLHttpRequest();
-	request.open('GET', './parsed_tag_responses.json', true);
-
-	request.onload = function() {
-		if (this.status >= 200 && this.status < 400) {
-		// Success!
-		var course_json_data = JSON.parse(this.response);
 		var template = document.getElementById('home_template').innerHTML;
 		Mustache.parse(template);   // optional, speeds up future uses
 		
@@ -107,44 +131,67 @@ function renderTitleScreen() {
 		tag_data = tag_data.concat(_.map(course_json_data, function(course) {return course.other_tags}));
 	
 		tag_data = _.flatten(tag_data);
-		tag_data = _.uniq(tag_data);
+		//tag_data = _.uniq(tag_data);
 
 		// Sort courses by tag name
 		tag_data.sort();	
 		console.log(tag_data);
 		
-		// Output HTML
+		
+		// Figure out how many times each tag is used
+		// https://stackoverflow.com/a/19395302
+		var tag_counts = {};
+		tag_data.forEach(function(x) { tag_counts[x] = (tag_counts[x] || 0)+1; });
+		
+		// Output in d3-cloud format
+		var frequency_list = [];
+		
+		for (var tag in tag_counts){
+			frequency_list.push({"text":tag, "size":tag_counts[tag]});
+		}
+	
+		
+		tag_data = _.uniq(tag_data, true);
+		
 		var rendered = Mustache.render(template, {tags:tag_data});
 		document.getElementById('target').innerHTML = rendered;
 		
 		
-		document.getElementById('#cloud').jQCloud(tag_data);
-		
-	  } else {
-		document.getElementById('target').innerHTML = "Cannot load data";
-	  }
-	};
+		 var color = d3.scale.linear()
+            .domain([0,1,2,3,4,5,6,10,15,20,100])
+            .range(["#66c2a5","#fc8d62","#8da0cb","#e78ac3","#a6d854"]); //"#ddd", "#ccc", "#bbb", "#aaa", "#999", "#888", "#777", "#666", "#555", "#444", "#333", "#222"]);
 
-	request.onerror = function() {
-	  // There was a connection error of some sort
-	  document.getElementById('target').innerHTML = "Cannot load data";
-	};
+    d3.layout.cloud().size([1024, 800])
+            .words(frequency_list)
+            .rotate(0)
+            .fontSize(function(d) { return d.size; })
+            .on("end", draw)
+            .start();
 
-	request.send();
-
-
+    function draw(words) {
+        d3.select("div.wordcloud").append("svg")
+                .attr("width", 1024)
+                .attr("height", 800)
+                .attr("class", "wordcloud")
+                .append("g")
+                // without the transform, words words would get cutoff to the left and top, they would
+                // appear outside of the SVG area
+                .attr("transform", "translate(320,200)")
+                .selectAll("text")
+                .data(words)
+                .enter().append("text")
+                .style("font-size", function(d) { return d.size + "px"; })
+                .style("fill", function(d, i) { return color(i); })
+                .attr("transform", function(d) {
+                    return "translate(" + [d.x, d.y] + ")rotate(" + d.rotate + ")";
+                })
+                .text(function(d) { return d.text; });
+    }
 }
 
 
-function renderTagData(tag) {
+function renderTagData(course_json_data, tag) {
 
-	var request = new XMLHttpRequest();
-	request.open('GET', './parsed_tag_responses.json', true);
-
-	request.onload = function() {
-		if (this.status >= 200 && this.status < 400) {
-		// Success!
-		var course_json_data = JSON.parse(this.response);
 		var template = document.getElementById('tag_template').innerHTML;
 		Mustache.parse(template);   // optional, speeds up future uses
 		// Find all the course that contain specified tag
@@ -160,50 +207,30 @@ function renderTagData(tag) {
 		// Output HTML
 		var rendered = Mustache.render(template, {tag:tag, courses:course_data});
 		document.getElementById('target').innerHTML = rendered;
-		
-	  } else {
-		document.getElementById('target').innerHTML = "Cannot load data";
-	  }
-	};
-
-	request.onerror = function() {
-	  // There was a connection error of some sort
-	  document.getElementById('target').innerHTML = "Cannot load data";
-	};
-
-	request.send();
+	
 }
 
 
 
-function renderCourseData(coursenumber) {
+function renderCourseData(course_json_data, coursenumber) {
 
-	var request = new XMLHttpRequest();
-	request.open('GET', './parsed_tag_responses.json', true);
-
-	request.onload = function() {
-		if (this.status >= 200 && this.status < 400) {
-		// Success!
-		var course_json_data = JSON.parse(this.response);
 		var template = document.getElementById('course_template').innerHTML;
 		Mustache.parse(template);   // optional, speeds up future uses
 		var course_data = _.findWhere(course_json_data, {coursenumber:coursenumber});
 		console.log(course_data);
 		var rendered = Mustache.render(template, course_data);
 		document.getElementById('target').innerHTML = rendered;
-		
-	  } else {
-		document.getElementById('target').innerHTML = "Cannot load data";
-	  }
-	};
-
-	request.onerror = function() {
-	  // There was a connection error of some sort
-	  document.getElementById('target').innerHTML = "Cannot load data";
-	};
-
-	request.send();
 }
+
+
+
+    var frequency_list = [{"text":"study","size":40},{"text":"motion","size":15},{"text":"forces","size":10},{"text":"electricity","size":15},{"text":"movement","size":10},{"text":"relation","size":5},{"text":"things","size":10},{"text":"force","size":5},{"text":"ad","size":5},{"text":"energy","size":85},{"text":"living","size":5},{"text":"nonliving","size":5},{"text":"laws","size":15},{"text":"speed","size":45},{"text":"velocity","size":30},{"text":"define","size":5},{"text":"constraints","size":5},{"text":"universe","size":10},{"text":"physics","size":120},{"text":"describing","size":5},{"text":"matter","size":90},{"text":"physics-the","size":5},{"text":"world","size":10},{"text":"works","size":10},{"text":"science","size":70},{"text":"interactions","size":30},{"text":"studies","size":5},{"text":"properties","size":45},{"text":"nature","size":40},{"text":"branch","size":30},{"text":"concerned","size":25},{"text":"source","size":40},{"text":"google","size":10},{"text":"defintions","size":5},{"text":"two","size":15},{"text":"grouped","size":15},{"text":"traditional","size":15},{"text":"fields","size":15},{"text":"acoustics","size":15},{"text":"optics","size":15},{"text":"mechanics","size":20},{"text":"thermodynamics","size":15},{"text":"electromagnetism","size":15},{"text":"modern","size":15},{"text":"extensions","size":15},{"text":"thefreedictionary","size":15},{"text":"interaction","size":15},{"text":"org","size":25},{"text":"answers","size":5},{"text":"natural","size":15},{"text":"objects","size":5},{"text":"treats","size":10},{"text":"acting","size":5},{"text":"department","size":5},{"text":"gravitation","size":5},{"text":"heat","size":10},{"text":"light","size":10},{"text":"magnetism","size":10},{"text":"modify","size":5},{"text":"general","size":10},{"text":"bodies","size":5},{"text":"philosophy","size":5},{"text":"brainyquote","size":5},{"text":"words","size":5},{"text":"ph","size":5},{"text":"html","size":5},{"text":"lrl","size":5},{"text":"zgzmeylfwuy","size":5},{"text":"subject","size":5},{"text":"distinguished","size":5},{"text":"chemistry","size":5},{"text":"biology","size":5},{"text":"includes","size":5},{"text":"radiation","size":5},{"text":"sound","size":5},{"text":"structure","size":5},{"text":"atoms","size":5},{"text":"including","size":10},{"text":"atomic","size":10},{"text":"nuclear","size":10},{"text":"cryogenics","size":10},{"text":"solid-state","size":10},{"text":"particle","size":10},{"text":"plasma","size":10},{"text":"deals","size":5},{"text":"merriam-webster","size":5},{"text":"dictionary","size":10},{"text":"analysis","size":5},{"text":"conducted","size":5},{"text":"order","size":5},{"text":"understand","size":5},{"text":"behaves","size":5},{"text":"en","size":5},{"text":"wikipedia","size":5},{"text":"wiki","size":5},{"text":"physics-","size":5},{"text":"physical","size":5},{"text":"behaviour","size":5},{"text":"collinsdictionary","size":5},{"text":"english","size":5},{"text":"time","size":35},{"text":"distance","size":35},{"text":"wheels","size":5},{"text":"revelations","size":5},{"text":"minute","size":5},{"text":"acceleration","size":20},{"text":"torque","size":5},{"text":"wheel","size":5},{"text":"rotations","size":5},{"text":"resistance","size":5},{"text":"momentum","size":5},{"text":"measure","size":10},{"text":"direction","size":10},{"text":"car","size":5},{"text":"add","size":5},{"text":"traveled","size":5},{"text":"weight","size":5},{"text":"electrical","size":5},{"text":"power","size":5}];
+
+
+
+
+  
+
 
 </script>
 
